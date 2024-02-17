@@ -1,53 +1,41 @@
-("use strict");
-const stripe = require("stripe")(process.env.STRIPE_KEY);
-/**
- * order controller
- */
+"use strict";
 
+const Razorpay = require("razorpay");
 const { createCoreController } = require("@strapi/strapi").factories;
+
+const instance = new Razorpay({
+  key_id: process.env.RAZOR_ID,
+  key_secret: process.env.RAZOR_SECRET,
+});
+
+
 
 module.exports = createCoreController("api::order.order", ({ strapi }) => ({
   async create(ctx) {
     const { products } = ctx.request.body;
     try {
-      const lineItems = await Promise.all(
-        products.map(async (product) => {
-          const item = await strapi
-            .service("api::product.product")
-            .findOne(product.id);
-
-          console.log("this is item------->", item);
-          console.log("this is product------->", product);
-
-          return {
-            price_data: {
-              currency: "inr",
-              product_data: {
-                name: item.name,
-              },
-              unit_amount: Math.round(item.price * 100),
-            },
-            quantity: product.quantity,
-          };
-        })
-      );
-
-      const session = await stripe.checkout.sessions.create({
-        shipping_address_collection: { allowed_countries: ["IN"] },
-        payment_method_types: ["card"],
-        mode: "payment",
-        success_url: process.env.CLIENT_URL + `/success`,
-        cancel_url: process.env.CLIENT_URL + "/failed",
-        line_items: lineItems,
+      function sumPrices(products) {
+        return products.reduce((sum, product) => sum + (product.attributes?.price || 0) * (product.quantity || 1), 0);
+      }
+      
+      const order = await instance.orders.create({
+        amount: sumPrices(products)*100, // Replace with the actual amount
+        currency: "INR",
+        receipt: "receipt#1",
+        notes: {
+          key1: "value3",
+          key2: "value2",
+        },
       });
 
       await strapi
         .service("api::order.order")
-        .create({ data: { products, stripeId: session.id } });
+        .create({ data: { products, stripeId: order.id } });
 
-      return { stripeSession: session };
+      // Redirect the user to the Razorpay checkout page
+      return { stripeSession: order };
     } catch (error) {
-      ctx.response.status = 500;
+      ctx.response.status  = 500;
       return { error };
     }
   },
